@@ -10,6 +10,22 @@ import re
 import subprocess
 import sys
 
+def find_layers():
+    cmd = ["bitbake-layers", "show-layers"]
+    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, text=True)
+    output, errors = process.communicate()
+
+    layers = []
+
+    lines = output.split("\n")
+    for line in lines:
+        tmp = [col for col in line.split(" ") if not col == ""]
+        if len(tmp) >= 2:
+            if "/repos/" in tmp[1]:
+                layers.append(tmp[1])
+
+    return layers
+
 def get_linux_source_dir(kernel_name):
     cmd = ["bitbake", f"linux-{kernel_name}", "-e"]
 
@@ -67,6 +83,7 @@ def get_bitbake_information(image):
     dpkg_status = f"{deploy_image_dir}/{image_full_name}.dpkg_status"
     return {
         "deploy_dir": deploy_dir,
+        "deploy_image_dir": deploy_image_dir,
         "image_full_name": image_full_name,
         "dl_dir": dl_dir,
         "dpkg_status": dpkg_status,
