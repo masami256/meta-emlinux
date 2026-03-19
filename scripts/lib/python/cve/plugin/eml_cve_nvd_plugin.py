@@ -171,7 +171,7 @@ class EmlNVDPlugin(EmlCvePlugin):
 
             c.execute(
                 "CREATE TABLE IF NOT EXISTS NVD (ID TEXT UNIQUE, VULNSTATUS TEXT, SUMMARY TEXT, SCOREV2 TEXT, \
-                SCOREV3 TEXT, MODIFIED INTEGER, VECTOR TEXT, VECTORSTRING TEXT)"
+                SCOREV3 TEXT, SCOREV4 TEXT, MODIFIED INTEGER, VECTOR TEXT, VECTORSTRING TEXT)"
             )
 
             c.execute(
@@ -312,6 +312,15 @@ class EmlNVDPlugin(EmlCvePlugin):
             "insert into PRODUCTS values (?, ?, ?, ?, ?, ?, ?)", _cpe_generator()
         ).close()
 
+
+    def _column_exsits(self, conn, column_name) -> bool:
+            cur = conn.cursor()
+            cur.execute("PRAGMA table_info(NVD)")
+            columns = [row[1] for row in cur.fetchall()]
+            cur.close()
+            return column_name in columns
+
+
     def _update_db(self, conn, elt):
         """
         Update a single entry in the on-disk database
@@ -327,6 +336,10 @@ class EmlNVDPlugin(EmlCvePlugin):
         else:
             vulnStatus = ""
 
+        cvssv2 = 0.0
+        cvssv3 = 0.0
+        cvssv4 = 0.0
+
         cveDesc = ""
         for desc in elt["cve"]["descriptions"]:
             if desc["lang"] == "en":
@@ -341,8 +354,8 @@ class EmlNVDPlugin(EmlCvePlugin):
             ]
             cvssv2 = elt["cve"]["metrics"]["cvssMetricV2"][0]["cvssData"]["baseScore"]
         except KeyError:
-            cvssv2 = 0.0
-        cvssv3 = None
+            pass
+
         try:
             accessVector = (
                 accessVector
@@ -355,6 +368,7 @@ class EmlNVDPlugin(EmlCvePlugin):
             cvssv3 = elt["cve"]["metrics"]["cvssMetricV30"][0]["cvssData"]["baseScore"]
         except KeyError:
             pass
+
         try:
             accessVector = (
                 accessVector
@@ -370,18 +384,37 @@ class EmlNVDPlugin(EmlCvePlugin):
             )
         except KeyError:
             pass
+ 
+        try:
+            accessVector = (
+                accessVector 
+                or elt['cve']['metrics']['cvssMetricV40'][0]['cvssData']['attackVector']
+            )
+
+            vectorString = (
+                vectorString
+                or elt['cve']['metrics']['cvssMetricV40'][0]['cvssData']['vectorString']
+            )
+            cvssv4 = elt['cve']['metrics']['cvssMetricV40'][0]['cvssData']['baseScore']
+        except KeyError:
+            pass
+        
         accessVector = accessVector or "UNKNOWN"
         vectorString = vectorString or "UNKNOWN"
-        cvssv3 = cvssv3 or 0.0
+
+        if not self._column_exsits(conn, "SCOREV4"):
+            logger.error(f"SCOREV4 column is not found in your NVD CVE database, please remove old one then create new database")
+            return False
 
         conn.execute(
-            "insert or replace into NVD values (?, ?, ?, ?, ?, ?, ?, ?)",
+            "insert or replace into NVD values (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [
                 cveId.strip(),
                 vulnStatus.strip(),
                 cveDesc.strip(),
                 cvssv2,
                 cvssv3,
+                cvssv4,
                 date.strip(),
                 accessVector.strip(),
                 vectorString.strip(),
@@ -400,6 +433,8 @@ class EmlNVDPlugin(EmlCvePlugin):
         except KeyError:
             logger.debug("CVE %s has no configurations" % cveId)
 
+        return True
+
     def _nvd_request_next(self, url: str, request_args: Any) -> str:
         """
         Request next part of the NVD dabase
@@ -409,6 +444,7 @@ class EmlNVDPlugin(EmlCvePlugin):
             url + "?" + urllib.parse.urlencode(request_args)
         )
         if self.nvd_api_key:
+            logger.debug(f"set api key({self.nvd_api_key})")
             request.add_header("apiKey", self.nvd_api_key)
         logger.debug(f"Requesting {request.full_url}")
 
@@ -464,7 +500,8 @@ class EmlNVDPlugin(EmlCvePlugin):
             per_page = data["resultsPerPage"]
             logger.debug(f"Got {per_page} entries")
             for cve in data["vulnerabilities"]:
-                self._update_db(conn, cve)
+                if not self._update_db(conn, cve):
+                    return False
 
             index += per_page
             if index >= total:
