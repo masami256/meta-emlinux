@@ -15,7 +15,7 @@ logger = logging.getLogger("emlinux-cve-check")
 
 import sqlite3
 
-CVE_DATABASE_NAME = "nvd_cve_db.db"
+CVE_DATABASE_NAME = "nvdcve_2-2.db"
 
 
 class NvdCveNvdInfo:
@@ -216,12 +216,11 @@ class NvdCveInfoListCreator:
         status: str,
     ) -> NvdCveNvdInfo:
         c = self.conn.cursor()
-        sql = f'SELECT VULNSTATUS, SUMMARY, SCOREV2, SCOREV3, SCOREV4, VECTOR, VECTORSTRING FROM NVD WHERE ID="{cveid}"'
+        sql = f'SELECT SUMMARY, SCOREV2, SCOREV3, SCOREV4, VECTOR, VECTORSTRING FROM NVD WHERE ID="{cveid}"'
         cursor = c.execute(sql)
         data = cursor.fetchone()
         c.close()
 
-        vuln_status = status
         summary = ""
         scorev2 = "0.0"
         scorev3 = "0.0"
@@ -230,15 +229,12 @@ class NvdCveInfoListCreator:
         vector_string = "UNKNOWN"
 
         if data:
-            if data[0] == "Rejected":
-                vuln_status = CveStatus.CVE_STATUS_REJECTED
-
-            summary = data[1]
-            scorev2 = data[2]
-            scorev3 = data[3]
-            scorev4 = data[4]
-            vector = data[5]
-            vector_string = data[6]
+            summary = data[0]
+            scorev2 = data[1]
+            scorev3 = data[2]
+            scorev4 = data[3]
+            vector = data[4]
+            vector_string = data[5]
 
         return NvdCveNvdInfo(
             cveid,
@@ -251,5 +247,5 @@ class NvdCveInfoListCreator:
             scorev4,
             vector,
             vector_string,
-            vuln_status,
+            status,
         )

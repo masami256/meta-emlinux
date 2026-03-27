@@ -52,7 +52,7 @@ class EmlNVDPlugin(EmlCvePlugin):
             cve_products,
         )
 
-        self.predownload_url = self.bitbakeinfo["cve_db_predownload"]
+        self.predownload_url = self.bitbakeinfo["cve_db_v2_predownload"]
         self.predownload = self.args.cve_db_predownload
 
         self.db_file = f"{self.cve_data_dir}/{nvd_lib.CVE_DATABASE_NAME}"
@@ -130,11 +130,17 @@ class EmlNVDPlugin(EmlCvePlugin):
     def _update_nvd_db(self) -> bool:
         result = False
 
+        skip_db_update = False
+        last_modified = None
+
+        db_file_exist = os.path.exists(self.db_file)
+
         conn = sqlite3.connect(self.db_file)
         logger.debug(f"Initialize nvd cve database {self.db_file}")
         self._initialize_nvd_cve_db(conn)
 
-        skip_db_update, last_modified = self._check_skip_db_update(conn)
+        if db_file_exist:
+            skip_db_update, last_modified = self._check_skip_db_update()
 
         if not skip_db_update and self.predownload:
             # predownload database file is old, download latest file
@@ -145,14 +151,12 @@ class EmlNVDPlugin(EmlCvePlugin):
 
             conn = sqlite3.connect(self.db_file)
             # re-check last modified date
-            skip_db_update, last_modified = self._check_skip_db_update(conn)
+            skip_db_update, last_modified = self._check_skip_db_update()
 
         if not skip_db_update:
             logger.info("Update NVD CVE database")
             if self._fetch_all_cves(conn, last_modified):
-                logger.info("Update last modified date")
-                self._update_last_modified_date(conn)
-                conn.commit()
+                logger.info("Update succeeded")
                 result = True
         else:
             logger.info("Last database update is in 1 day skip NVD database update")
@@ -166,7 +170,7 @@ class EmlNVDPlugin(EmlCvePlugin):
             c = conn.cursor()
 
             c.execute(
-                "CREATE TABLE IF NOT EXISTS META (ID NUMBER UNIQUE, LASTMODIFIED TEXT)"
+                "CREATE TABLE IF NOT EXISTS META (YEAR INTEGER UNIQUE, DATE TEXT)"
             )
 
             c.execute(
@@ -184,36 +188,25 @@ class EmlNVDPlugin(EmlCvePlugin):
 
             c.close()
 
-    def _check_skip_db_update(self, conn: sqlite3.Connection) -> Tuple[bool, str]:
+    def _check_skip_db_update(self) -> Tuple[bool, str]:
         skip_db_update = False
-        last_modified = self._get_last_modified_date(conn)
-        if last_modified:
-            d1 = datetime.datetime.fromisoformat(datetime.datetime.now().isoformat())
-            d2 = datetime.datetime.fromisoformat(last_modified)
 
-            date_delta = d1 - d2
-            if date_delta.total_seconds() < CVE_DB_UPDATE_INTERVAL:
-                skip_db_update = True
-            else:
-                # Database is too old so that fetch all data
-                if date_delta.days > 120:
-                    last_modified = None
+        last_modified = os.path.getmtime(self.db_file)
+        last_modified_date = datetime.datetime.fromtimestamp(last_modified, tz=datetime.timezone.utc)
+        today_date = datetime.datetime.now(tz=datetime.timezone.utc)
+        now = time.time()
 
-        return skip_db_update, last_modified
+        if now - last_modified < CVE_DB_UPDATE_INTERVAL:
+            logger.debug(f"Skip update database: Database was updated {now - last_modified} seconds ago.")
+            return True, last_modified_date
 
-    def _get_last_modified_date(self, conn: sqlite3.Connection) -> str:
-        with conn:
-            c = conn.cursor()
+        delta = today_date - last_modified_date
+        # Database is too old so that fetch all data
+        if delta.days < 120:
+            return True, last_modified_date
 
-            cursor = c.execute("SELECT LASTMODIFIED from META")
+        return False, last_modified_date
 
-            last = cursor.fetchone()
-            c.close()
-
-            if last is None:
-                return None
-
-            return last[0]
 
     def _predownload_db(self, predownload_url: str) -> bool:
         logger.info(f"Download CVE database file from {predownload_url}.")
@@ -511,20 +504,3 @@ class EmlNVDPlugin(EmlCvePlugin):
 
         return True
 
-    def _update_last_modified_date(self, conn: sqlite3.Connection) -> None:
-        d = datetime.datetime.now().isoformat()
-
-        with conn:
-            c = conn.cursor()
-
-            cursor = c.execute("SELECT LASTMODIFIED from META where ID=1")
-            last = cursor.fetchone()
-
-            if last is None:
-                sql = f"INSERT INTO META VALUES (1, '{d}')"
-            else:
-                sql = f"UPDATE META set LASTMODIFIED='{d}' where ID=1"
-
-            c.execute(sql)
-
-            c.close()
