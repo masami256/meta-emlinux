@@ -384,8 +384,6 @@ def main(args: dict):
     output_base_dir = (
         f"{bitbakeinfo['deploy_dir']}/cve/{bitbakeinfo['image_full_name']}"
     )
-    # Use cve_check_ng scripts own directory for testing
-    output_base_dir = f"{output_base_dir}/cve_check_ng"
 
     reporter = CveReporter(output_base_dir, bitbakeinfo["image_full_name"])
     reporter.write_report(args.output_format, cve_info_list, installed_packages)
@@ -465,7 +463,7 @@ def parse_options():
         "--cve-db-predownload",
         dest="cve_db_predownload",
         action="store_true",
-        help="Enable CVE database predownload.URL should be defined by CVE_DB_PREDOWNLOAD_URL in conf/local.conf.",
+        help="Enable CVE database predownload.URL should be defined by CVE_DB_V2_PREDOWNLOAD_URL in conf/local.conf.",
     )
     plugin_opts.add_argument(
         "--update-cve-databese-only",
@@ -488,7 +486,4 @@ def parse_options():
 
 
 if __name__ == "__main__":
-    logger.info("|------------------------------|")
-    logger.info("| This is experimental version |")
-    logger.info("|------------------------------|")
     main(parse_options())
