@@ -25,6 +25,7 @@ import bitbake_runner
 import sbom_cyclonedx
 import sbom_spdx
 import licensing
+import pprint
 
 # Only show critical error from debian copyright library
 copyright.logger.setLevel(logging.CRITICAL)
@@ -352,6 +353,45 @@ def create_license_data(installed_pkgs, license_mapping):
         )
         installed_pkgs[pkg]["license_id_text"] = license_id_text
 
+def convert_source_info_to_package_data(pkgname, data):
+    d = {}
+
+    package = pkgname
+    try:
+        idx = data["provides"].index(pkgname)
+        package = data["provides"][idx]
+    except:
+        pass
+
+    d["package"] = package
+    d["source"] = data["source_package_name"]
+    d["version"] = data["version"]
+    d["maintainer"] = data["maintainer"]
+    d["section"] = data["section"]
+    d["homepage"] = data["homepage"]
+    d["arch"] = data["arch"]
+    d["source"] = pkgname
+    d["description"] = data["description"]
+    d["license"] = data["license"]
+
+    return d
+
+def get_image_bom_pkg_info(imager_bom, srcinfo_json):
+    srcinfo = {}
+    with open(srcinfo_json) as f:
+        srcinfo = json.load(f)
+
+    srcinfo_pkgs = set([k for k in srcinfo.keys()])
+    imager_bom_pkgs = set(imager_bom.strip().split(" "))
+
+    pkg_names = imager_bom_pkgs & srcinfo_pkgs
+
+    pkgs = {}
+    for name in pkg_names:
+        pkgs[name] = convert_source_info_to_package_data(name, srcinfo[name])
+
+    return pkgs
+
 
 def main(args):
     if args.verbose_output:
@@ -361,11 +401,16 @@ def main(args):
     rootfs = bitbakeinfo["rootfs_dir"]
     dpkg_status = bitbakeinfo["dpkg_status"]
 
+    imager_bom = bitbakeinfo["imager_bom"]
+
     distro = args.distro
     if not distro:
         distro = bitbakeinfo["image_distro"].split("-")[1]
 
     installed_pkgs = parse_dpkg_status(dpkg_status)
+
+    srcinfo_json = f"{bitbakeinfo['deploy_dir']}/images/{bitbakeinfo['machine']}/all-source-info.json"
+    imager_bom_pkgs = get_image_bom_pkg_info(imager_bom, srcinfo_json)
 
     layers = bitbake_runner.find_layers()
     user_defined_licenses = read_license_files(layers, args.user_defined_licenses)
@@ -386,6 +431,9 @@ def main(args):
     read_copyright_files(rootfs, installed_pkgs, user_defined_licenses)
     create_license_data(installed_pkgs, license_mapping)
 
+    pprint.pprint(installed_pkgs["hostname"])
+    exit(0)
+    #installed_pkgs.update(imager_bom_pkgs)
     output_dir = f"{bitbakeinfo['deploy_dir']}/sbom/{bitbakeinfo['image_full_name']}"
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
