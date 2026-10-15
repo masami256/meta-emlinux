@@ -588,8 +588,12 @@ def main(args):
 
     installed_pkgs = merge_package_data(installed_pkgs, packages_info)
 
+    # TEST
+    #installed_pkgs = {}
+    #del imager_bom_pkgs["imx-atf"]
+    #del imager_bom_pkgs["imx-boot"]
+    # END TEST
     installed_pkgs.update(imager_bom_pkgs)
-
     read_copyright_files(rootfs, installed_pkgs, user_defined_licenses)
 
     create_license_data(installed_pkgs, license_mapping)
