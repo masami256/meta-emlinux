@@ -599,12 +599,11 @@ def main(args):
 
     installed_pkgs = merge_package_data(installed_pkgs, packages_info)
 
-    #installed_pkgs.update(imager_bom_pkgs)
+    installed_pkgs.update(imager_bom_pkgs)
     read_copyright_files(rootfs, installed_pkgs, user_defined_licenses)
 
     #pprint.pprint(imager_bom_pkgs)
     #pprint.pprint(installed_pkgs)
-    installed_pkgs.update(imager_bom_pkgs)
     create_license_data(installed_pkgs, license_mapping)
 
     output_dir = f"{bitbakeinfo['deploy_dir']}/sbom/{bitbakeinfo['image_full_name']}"
