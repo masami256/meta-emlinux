@@ -25,6 +25,7 @@ import bitbake_runner
 import sbom_cyclonedx
 import sbom_spdx
 import licensing
+import recipe_license_parser
 import pprint
 
 # Only show critical error from debian copyright library
@@ -355,10 +356,10 @@ def create_license_data(installed_pkgs, license_mapping):
 
 def create_license_data_for_imager_bom(imager_bom_pkgs, license_mapping):
     for pkg in imager_bom_pkgs:
-        licenses = licensing.split_license_for_imager_bom_pkgs(imager_bom_pkgs[pkg]["license"])
-        normalized_text = licensing.normalize_licese_field(licenses, license_mapping)
+        licenses = recipe_license_parser.split_license_for_imager_bom_pkgs(imager_bom_pkgs[pkg]["license"])
+        normalized_text = recipe_license_parser.normalize_licese_field(licenses, license_mapping)
         imager_bom_pkgs[pkg]["normalized_license"] = normalized_text
-        synopsis = licensing.parse_to_license_array(normalized_text)
+        synopsis = recipe_license_parser.parse_to_license_array(normalized_text)
 
         imager_bom_pkgs[pkg]["licenses"] = {
             "synopsis": synopsis,
