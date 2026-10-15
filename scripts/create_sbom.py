@@ -32,22 +32,35 @@ copyright.logger.setLevel(logging.CRITICAL)
 
 import re
 
-import re
-from typing import List
+def strip_outer_parentheses(text):
+    text = text.strip()
+    while text.startswith('(') and text.endswith(')'):
+        depth = 0
+        is_outer = True
+        for i, char in enumerate(text[:-1]):
+            if char == '(':
+                depth += 1
+            elif char == ')':
+                depth -= 1
+            if depth == 0 and i > 0:
+                is_outer = False
+                break
 
-def parse_top_level_and(expression: str):
+        if is_outer:
+            text = text[1:-1].strip()
+        else:
+            break
+    return text
+
+def parse_to_license_array(expression):
     tokens = re.split(r'(\(|\)|\s+)', expression)
     
     elements = []
     current_element = []
     depth = 0
 
-    i = 0
-    while i < len(tokens):
-        token = tokens[i]
-        
+    for token in tokens:
         if not token:
-            i += 1
             continue
 
         if token == '(':
@@ -63,34 +76,12 @@ def parse_top_level_and(expression: str):
             current_element = []
         else:
             current_element.append(token)
-            
-        i += 1
 
     last_elem_str = "".join(current_element).strip()
     if last_elem_str:
         elements.append(last_elem_str)
 
-    normalized_elements = []
-    for elem in elements:
-        elem = elem.strip()
-        while elem.startswith('(') and elem.endswith(')'):
-            inner_depth = 0
-            is_valid_outer = True
-            for idx, ch in enumerate(elem[:-1]):
-                if ch == '(':
-                    inner_depth += 1
-                elif ch == ')':
-                    inner_depth -= 1
-                if inner_depth == 0 and idx > 0:
-                    is_valid_outer = False
-                    break
-            if is_valid_outer:
-                elem = elem[1:-1].strip()
-            else:
-                break
-        normalized_elements.append(elem)
-
-    return normalized_elements
+    return [strip_outer_parentheses(elem) for elem in elements]
 
 def normalize_license_name(raw_name, license_mapping):
     cleaned = raw_name.strip()
@@ -512,13 +503,12 @@ def create_license_data_for_imager_bom(imager_bom_pkgs, license_mapping):
         licenses = split_license_for_imager_bom_pkgs(imager_bom_pkgs[pkg]["license"])
         normalized_text = normalize_licese_field(licenses, license_mapping)
         imager_bom_pkgs[pkg]["normalized_license"] = normalized_text
-        synopsis = parse_top_level_and(normalized_text)
+        synopsis = parse_to_license_array(normalized_text)
 
         imager_bom_pkgs[pkg]["licenses"] = {
             "synopsis": synopsis,
             "text": {},
         }
-
         del imager_bom_pkgs[pkg]["license"]
 
 def convert_source_info_to_package_data(pkgname, data):
@@ -577,7 +567,6 @@ def main(args):
 
     installed_pkgs = parse_dpkg_status(dpkg_status)
 
-
     layers = bitbake_runner.find_layers()
     user_defined_licenses = read_license_files(layers, args.user_defined_licenses)
     license_mapping = read_license_mapping_files(
@@ -600,10 +589,9 @@ def main(args):
     installed_pkgs = merge_package_data(installed_pkgs, packages_info)
 
     installed_pkgs.update(imager_bom_pkgs)
+
     read_copyright_files(rootfs, installed_pkgs, user_defined_licenses)
 
-    #pprint.pprint(imager_bom_pkgs)
-    #pprint.pprint(installed_pkgs)
     create_license_data(installed_pkgs, license_mapping)
 
     output_dir = f"{bitbakeinfo['deploy_dir']}/sbom/{bitbakeinfo['image_full_name']}"
