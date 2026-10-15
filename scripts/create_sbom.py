@@ -32,6 +32,66 @@ copyright.logger.setLevel(logging.CRITICAL)
 
 import re
 
+import re
+from typing import List
+
+def parse_top_level_and(expression: str):
+    tokens = re.split(r'(\(|\)|\s+)', expression)
+    
+    elements = []
+    current_element = []
+    depth = 0
+
+    i = 0
+    while i < len(tokens):
+        token = tokens[i]
+        
+        if not token:
+            i += 1
+            continue
+
+        if token == '(':
+            depth += 1
+            current_element.append(token)
+        elif token == ')':
+            depth -= 1
+            current_element.append(token)
+        elif depth == 0 and token.strip().upper() == 'AND':
+            elem_str = "".join(current_element).strip()
+            if elem_str:
+                elements.append(elem_str)
+            current_element = []
+        else:
+            current_element.append(token)
+            
+        i += 1
+
+    last_elem_str = "".join(current_element).strip()
+    if last_elem_str:
+        elements.append(last_elem_str)
+
+    normalized_elements = []
+    for elem in elements:
+        elem = elem.strip()
+        while elem.startswith('(') and elem.endswith(')'):
+            inner_depth = 0
+            is_valid_outer = True
+            for idx, ch in enumerate(elem[:-1]):
+                if ch == '(':
+                    inner_depth += 1
+                elif ch == ')':
+                    inner_depth -= 1
+                if inner_depth == 0 and idx > 0:
+                    is_valid_outer = False
+                    break
+            if is_valid_outer:
+                elem = elem[1:-1].strip()
+            else:
+                break
+        normalized_elements.append(elem)
+
+    return normalized_elements
+
 def normalize_license_name(raw_name, license_mapping):
     cleaned = raw_name.strip()
     lower_name = cleaned.lower()
@@ -96,8 +156,7 @@ def parse_to_ast(tokens, license_mapping):
        left = output_stack.pop()
        output_stack.append((op, left, right))
 
-    stack = output_stack[0] if output_stack else ""
-    return stack, licenses
+    return output_stack[0] if output_stack else ""
 
 def ast_to_spdx(node, parent_op=None):
     if isinstance(node, str):
@@ -119,9 +178,8 @@ def ast_to_spdx(node, parent_op=None):
 
 def normalize_licese_field(raw_license, license_mapping):
     tokens = tokenize(raw_license)
-    ast, uniq_licenses = parse_to_ast(tokens, license_mapping)
-    normalized_licenses = ast_to_spdx(ast)
-    return normalized_licenses, uniq_licenses
+    ast = parse_to_ast(tokens, license_mapping)
+    return ast_to_spdx(ast)
 
 def merge_package_data(installed_pkgs, packages_info):
     for pkg in installed_pkgs:
@@ -450,16 +508,15 @@ def split_license_for_imager_bom_pkgs(licenses):
     return licenses 
 
 def create_license_data_for_imager_bom(imager_bom_pkgs, license_mapping):
-    #NormalizeLicenseField
-
     for pkg in imager_bom_pkgs:
         licenses = split_license_for_imager_bom_pkgs(imager_bom_pkgs[pkg]["license"])
-        normalized_text, synopsis = normalize_licese_field(licenses, license_mapping)
+        normalized_text = normalize_licese_field(licenses, license_mapping)
         imager_bom_pkgs[pkg]["normalized_license"] = normalized_text
+        synopsis = parse_top_level_and(normalized_text)
 
         imager_bom_pkgs[pkg]["licenses"] = {
             "synopsis": synopsis,
-            "text": [],
+            "text": {},
         }
 
         del imager_bom_pkgs[pkg]["license"]
@@ -542,6 +599,7 @@ def main(args):
 
     installed_pkgs = merge_package_data(installed_pkgs, packages_info)
 
+    #installed_pkgs.update(imager_bom_pkgs)
     read_copyright_files(rootfs, installed_pkgs, user_defined_licenses)
 
     #pprint.pprint(imager_bom_pkgs)
@@ -549,7 +607,6 @@ def main(args):
     installed_pkgs.update(imager_bom_pkgs)
     create_license_data(installed_pkgs, license_mapping)
 
-    #installed_pkgs.update(imager_bom_pkgs)
     output_dir = f"{bitbakeinfo['deploy_dir']}/sbom/{bitbakeinfo['image_full_name']}"
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
