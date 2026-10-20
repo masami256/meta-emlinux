@@ -70,10 +70,12 @@ def get_bitbake_information(image):
     pattern_repo_isar_dir = r'\nREPO_ISAR_DIR="([^"]*)"'
     pattern_image_distro = r'\nDISTRO="([^"]*)"'
     pattern_imager_bom = r'\nIMAGER_BOM="([^"]*)"'
+    pattern_image_fstypes = r'\nIMAGE_FSTYPES="([^"]*)"'
+    pattern_debdir = r'\nDEBDIR="([^"]*)"'
     pattern_cve_db_predownload = r'\nCVE_DB_PREDOWNLOAD_URL="([^"]*)"'
     pattern_cve_db_v2_predownload = r'\nCVE_DB_V2_PREDOWNLOAD_URL="([^"]*)"'
     pattern_layer_emlinux = r'\nLAYERDIR_emlinux="([^"]*)"'
-
+    
     machine = re.findall(pattern_machine, output)[0]
     deploy_image_dir = re.findall(pattern_deploy_image_dir, output)[0]
     deploy_dir = re.findall(pattern_deploy_dir, output)[0]
@@ -86,6 +88,8 @@ def get_bitbake_information(image):
     repo_isar_dir = re.findall(pattern_repo_isar_dir, output)[0]
     image_distro = re.findall(pattern_image_distro, output)[0]
     imager_bom = re.findall(pattern_imager_bom, output)[0]
+    image_fstypes = re.findall(pattern_image_fstypes, output)[0]
+    debdir = re.findall(pattern_debdir, output)[0]
     emlinux_layer_dir = re.findall(pattern_layer_emlinux, output)[0]
 
     cve_db_url = re.findall(pattern_cve_db_predownload, output)
@@ -115,6 +119,8 @@ def get_bitbake_information(image):
         "repo_isar_dir": repo_isar_dir,
         "image_distro": image_distro,
         "imager_bom": imager_bom,
+        "image_fstypes": image_fstypes,
+        "debdir": debdir,
         "cve_db_predownload": cve_db_predownload,
         "cve_db_v2_predownload": cve_db_v2_predownload,
         "emlinux_layer_dir": emlinux_layer_dir,

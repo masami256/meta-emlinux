@@ -26,6 +26,7 @@ import sbom_cyclonedx
 import sbom_spdx
 import licensing
 import recipe_license_parser
+import manifest_parser
 import pprint
 
 # Only show critical error from debian copyright library
@@ -34,8 +35,7 @@ copyright.logger.setLevel(logging.CRITICAL)
 def merge_package_data(installed_pkgs, packages_info):
     for pkg in installed_pkgs:
         if pkg in packages_info:
-            installed_pkgs[pkg]["sha256sum"] = packages_info[pkg]["sha256sum"]
-            installed_pkgs[pkg]["description"] = packages_info[pkg]["description"]
+            installed_pkgs[pkg] = packages_info[pkg]
 
     return installed_pkgs
 
@@ -54,31 +54,56 @@ def find_deb_packages(dl_dir, repo_isar_dir, distro, image_distro):
     return ret
 
 
+def read_debian_control_file(debfile, distro_arch, manifest_packages):
+    pkgname = None
+    ret = {}
+
+    with debian.debfile.DebFile(debfile) as deb:
+        control = deb.debcontrol()
+
+        pkgname = control.get("Package", "Unknown")
+        arch = control.get("Architecture", "Unknown")
+        source = control.get("Source", None)
+        if source is None:
+            source = pkgname
+
+        desc = control.get("Description", "No description")
+        maintainer = control.get("Maintainer", "Unknown")
+        homepage = control.get("Homepage", "Unknown")
+        section = control.get("Section", "Unknown")
+        version = control.get("Version", "Unknown")
+
+        if arch == distro_arch or arch == "all" or pkgname in manifest_packages:
+            sha256sum = None
+            sha256hash = hashlib.sha256()
+            with open(debfile, "rb") as f:
+                for block in iter(lambda: f.read(4096), b""):
+                    sha256hash.update(block)
+                    sha256sum = sha256hash.hexdigest()
+            ret[pkgname] = {
+                "package": pkgname,
+                "source": source,
+                "arch": arch,
+                "section": section,
+                "maintainer": maintainer,
+                "sha256sum": sha256sum,
+                "description": desc,
+                "version": version,
+            }
+
+    return ret
+
 def get_package_info_from_control(
-    dl_dir, repo_isar_dir, distro, image_distro, distro_arch
+    dl_dir, repo_isar_dir,
+    distro, image_distro,
+    distro_arch, manifest_packages,
 ):
     ret = {}
 
     debs = find_deb_packages(dl_dir, repo_isar_dir, distro, image_distro)
     for debfile in debs:
-        pkgname = None
-        with debian.debfile.DebFile(debfile) as deb:
-            control = deb.debcontrol()
-            pkgname = control.get("Package", "Unknown")
-            arch = control.get("Architecture", "Unknown")
-            desc = control.get("Description", "No description")
-
-            if arch == distro_arch or arch == "all":
-                sha256sum = None
-                sha256hash = hashlib.sha256()
-                with open(debfile, "rb") as f:
-                    for block in iter(lambda: f.read(4096), b""):
-                        sha256hash.update(block)
-                        sha256sum = sha256hash.hexdigest()
-                ret[pkgname] = {
-                    "sha256sum": sha256sum,
-                    "description": desc,
-                }
+        pkgdata = read_debian_control_file(debfile, distro_arch, manifest_packages)
+        ret.update(pkgdata)
 
     return ret
 
@@ -136,6 +161,7 @@ def parse_dpkg_status(dpkgstatus):
 def read_copyright_files(rootfs, installed_pkgs, user_defined_licenses):
     for pkg in installed_pkgs:
         logger.debug(f"Checking copyright for {pkg}")
+        print(f"Checking copyright for {pkg}")
         path = f"{rootfs}/usr/share/doc/{installed_pkgs[pkg]['package']}/copyright"
 
         if os.path.exists(path):
@@ -390,7 +416,7 @@ def convert_source_info_to_package_data(pkgname, data):
 
     return d
 
-def get_image_bom_pkg_info(imager_bom, srcinfo_json):
+def get_imager_bom_pkg_info(imager_bom, srcinfo_json):
     srcinfo = {}
     with open(srcinfo_json) as f:
         srcinfo = json.load(f)
@@ -422,15 +448,22 @@ def main(args):
         distro = bitbakeinfo["image_distro"].split("-")[1]
 
     installed_pkgs = parse_dpkg_status(dpkg_status)
-
+    installed_pkgs = {}
+    
     layers = bitbake_runner.find_layers()
     user_defined_licenses = read_license_files(layers, args.user_defined_licenses)
     license_mapping = read_license_mapping_files(
         layers, args.user_defined_license_mapping
     )
 
-    srcinfo_json = f"{bitbakeinfo['deploy_dir']}/images/{bitbakeinfo['machine']}/all-source-info.json"
-    imager_bom_pkgs = get_image_bom_pkg_info(imager_bom, srcinfo_json)
+    image_deploy_dir = f"{bitbakeinfo['deploy_dir']}/images/{bitbakeinfo['machine']}"
+    srcinfo_json = f"{image_deploy_dir}/all-source-info.json"
+    imager_bom_pkgs = get_imager_bom_pkg_info(imager_bom, srcinfo_json)
+
+    manifests = manifest_parser.find_manifest_files(image_deploy_dir, bitbakeinfo["image_full_name"], bitbakeinfo["image_fstypes"])
+    manifest_packages = manifest_parser.collect_packages(manifests, imager_bom)
+
+    installed_pkgs.update(manifest_packages)
 
     create_license_data_for_imager_bom(imager_bom_pkgs, license_mapping)
 
@@ -440,6 +473,7 @@ def main(args):
         distro,
         bitbakeinfo["image_distro"],
         bitbakeinfo["distro_arch"],
+        manifest_packages,
     )
 
     installed_pkgs = merge_package_data(installed_pkgs, packages_info)
