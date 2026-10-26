@@ -54,60 +54,6 @@ def find_deb_packages(dl_dir, repo_isar_dir, distro, image_distro):
     return ret
 
 
-def read_debian_control_file(debfile, distro_arch, manifest_packages):
-    pkgname = None
-    ret = {}
-
-    with debian.debfile.DebFile(debfile) as deb:
-        control = deb.debcontrol()
-
-        pkgname = control.get("Package", "Unknown")
-        arch = control.get("Architecture", "Unknown")
-        source = control.get("Source", None)
-        if source is None:
-            source = pkgname
-
-        desc = control.get("Description", "No description")
-        maintainer = control.get("Maintainer", "Unknown")
-        homepage = control.get("Homepage", "Unknown")
-        section = control.get("Section", "Unknown")
-        version = control.get("Version", "Unknown")
-
-        if arch == distro_arch or arch == "all" or pkgname in manifest_packages:
-            sha256sum = None
-            sha256hash = hashlib.sha256()
-            with open(debfile, "rb") as f:
-                for block in iter(lambda: f.read(4096), b""):
-                    sha256hash.update(block)
-                    sha256sum = sha256hash.hexdigest()
-            ret[pkgname] = {
-                "package": pkgname,
-                "source": source,
-                "arch": arch,
-                "section": section,
-                "maintainer": maintainer,
-                "sha256sum": sha256sum,
-                "description": desc,
-                "version": version,
-            }
-
-    return ret
-
-def get_package_info_from_control(
-    dl_dir, repo_isar_dir,
-    distro, image_distro,
-    distro_arch, manifest_packages,
-):
-    ret = {}
-
-    debs = find_deb_packages(dl_dir, repo_isar_dir, distro, image_distro)
-    for debfile in debs:
-        pkgdata = read_debian_control_file(debfile, distro_arch, manifest_packages)
-        ret.update(pkgdata)
-
-    return ret
-
-
 def parse_copyright_file(copyright_file):
     licenses = {}
 
@@ -135,6 +81,109 @@ def parse_copyright_file(copyright_file):
     return licenses
 
 
+def get_synopsis_and_copyright_text_from_copyright_text(pkgname, installed_pkgs, user_defined_licenses):
+    # When failed to parse copyright file or package name is in user defined license file,
+    # set license from license defined file
+    if not "licenses" in installed_pkgs[pkgname] or pkgname in user_defined_licenses:
+        logger.debug(f"Check user defined mapping file for {pkgname}")
+        if pkgname in user_defined_licenses:
+            logger.debug(f"found {pkgname} in user defined license file")
+            synopsis = user_defined_licenses[pkgname]["synopsis"]
+
+            installed_pkgs[pkgname]["licenses"] = {
+               "synopsis": synopsis,
+                "text": {},
+            }
+
+            for lic_name in user_defined_licenses[pkgname]["license_data"]:
+                lic_data = user_defined_licenses[pkgname]["license_data"][lic_name]
+                installed_pkgs[pkgname]["licenses"]["text"][lic_name] = lic_data["text"]
+
+    if not "licenses" in installed_pkgs[pkgname]:
+        logger.warning(
+            f"{pkgname}: Cannot get licenses from Copyright file and user defined license mapping file. So, set NOASSERTION as license."
+        )
+        installed_pkgs[pkgname]["licenses"] = {
+            "synopsis": ["NOASSERTION"], 
+            "text": {}
+        }
+
+def read_copyright_files(rootfs, installed_pkgs, user_defined_licenses):
+    for pkg in installed_pkgs:
+        logger.debug(f"Checking copyright for {pkg}")
+        path = f"{rootfs}/usr/share/doc/{installed_pkgs[pkg]['package']}/copyright"
+
+        if os.path.exists(path):
+            licenses = parse_copyright_file(path)
+            if bool(licenses):
+                installed_pkgs[pkg]["licenses"] = licenses
+        # else:
+        #    logger.warning(f"Packge {pkg} does not contain copyright file")
+
+        get_synopsis_and_copyright_text_from_copyright_text(pkg, installed_pkgs, user_defined_licenses)
+
+
+def read_package_infor_from_deb_file(debfile, distro_arch, manifest_packages):
+    pkgname = None
+    ret = {}
+
+    with debian.debfile.DebFile(debfile) as deb:
+        control = deb.debcontrol()
+
+        pkgname = control.get("Package", "Unknown")
+        arch = control.get("Architecture", "Unknown")
+        source = control.get("Source", None)
+        if source is None:
+            source = pkgname
+
+        desc = control.get("Description", "No description")
+        maintainer = control.get("Maintainer", "Unknown")
+        homepage = control.get("Homepage", "Unknown")
+        section = control.get("Section", "Unknown")
+        version = control.get("Version", "Unknown")
+
+        path = f"usr/share/doc/{pkgname}/copyright"
+        if deb.data.has_file(path):
+            text = deb.data.get_content(path).decode("utf-8")
+        else:
+            pass
+
+        if arch == distro_arch or arch == "all" or pkgname in manifest_packages:
+            sha256sum = None
+            sha256hash = hashlib.sha256()
+            with open(debfile, "rb") as f:
+                for block in iter(lambda: f.read(4096), b""):
+                    sha256hash.update(block)
+                    sha256sum = sha256hash.hexdigest()
+            ret[pkgname] = {
+                "package": pkgname,
+                "source": source,
+                "arch": arch,
+                "section": section,
+                "maintainer": maintainer,
+                "sha256sum": sha256sum,
+                "description": desc,
+                "version": version,
+            }
+
+    return ret
+
+
+def get_package_info_fron_deb_file(
+    dl_dir, repo_isar_dir,
+    distro, image_distro,
+    distro_arch, manifest_packages,
+):
+    ret = {}
+
+    debs = find_deb_packages(dl_dir, repo_isar_dir, distro, image_distro)
+    for debfile in debs:
+        pkgdata = read_package_infor_from_deb_file(debfile, distro_arch, manifest_packages)
+        ret.update(pkgdata)
+
+    return ret
+
+
 def parse_dpkg_status(dpkgstatus):
     ret = {}
 
@@ -156,44 +205,6 @@ def parse_dpkg_status(dpkgstatus):
             ret[d["package"]] = d
 
     return ret
-
-
-def read_copyright_files(rootfs, installed_pkgs, user_defined_licenses):
-    for pkg in installed_pkgs:
-        logger.debug(f"Checking copyright for {pkg}")
-        print(f"Checking copyright for {pkg}")
-        path = f"{rootfs}/usr/share/doc/{installed_pkgs[pkg]['package']}/copyright"
-
-        if os.path.exists(path):
-            licenses = parse_copyright_file(path)
-            if bool(licenses):
-                installed_pkgs[pkg]["licenses"] = licenses
-        # else:
-        #    logger.warning(f"Packge {pkg} does not contain copyright file")
-
-        # When failed to parse copyright file or package name is in user defined license file,
-        # set license from license defined file
-        if not "licenses" in installed_pkgs[pkg] or pkg in user_defined_licenses:
-            logger.debug(f"Check user defined mapping file for {pkg}")
-            if pkg in user_defined_licenses:
-                logger.debug(f"found {pkg} in user defined license file")
-                synopsis = user_defined_licenses[pkg]["synopsis"]
-
-                installed_pkgs[pkg]["licenses"] = {
-                    "synopsis": synopsis,
-                    "text": {},
-                }
-
-                for lic_name in user_defined_licenses[pkg]["license_data"]:
-                    lic_data = user_defined_licenses[pkg]["license_data"][lic_name]
-                    installed_pkgs[pkg]["licenses"]["text"][lic_name] = lic_data["text"]
-
-        if not "licenses" in installed_pkgs[pkg]:
-            logger.warning(
-                f"{pkg}: Cannot get licenses from Copyright file and user defined license mapping file. So, set NOASSERTION as license."
-            )
-            installed_pkgs[pkg]["licenses"] = {"synopsis": ["NOASSERTION"], "text": {}}
-
 
 def make_user_defined_license_data(yml_file_name):
     license_data = {}
@@ -467,7 +478,7 @@ def main(args):
 
     create_license_data_for_imager_bom(imager_bom_pkgs, license_mapping)
 
-    packages_info = get_package_info_from_control(
+    packages_info = get_package_info_fron_deb_file(
         bitbakeinfo["dl_dir"],
         bitbakeinfo["repo_isar_dir"],
         distro,
