@@ -54,29 +54,28 @@ def find_deb_packages(dl_dir, repo_isar_dir, distro, image_distro):
     return ret
 
 
-def parse_copyright_file(copyright_file):
+def parse_copyright_text(copyright_text):
     licenses = {}
 
-    with io.open(copyright_file, "rt", encoding="utf-8") as f:
-        try:
-            c = copyright.Copyright(f, strict=False)
-        except Exception:
-            logger.debug(
-                f"Read copyright file error for {copyright_file}. May be this file uses old foromat."
-            )
-        else:
-            for p in c.all_files_paragraphs():
-                if p.license and p.license.synopsis:
-                    licenses.setdefault("synopsis", []).append(p.license.synopsis)
-                    if len(p.license.text) > 0:
-                        licenses.setdefault("text", {})[
-                            p.license.synopsis
-                        ] = p.license.text
-            for text in c.all_license_paragraphs():
-                if text.license:
+    try:
+        c = copyright.Copyright(io.StringIO(copyright_text), strict=False)
+    except Exception:
+        logger.debug(
+            f"Read copyright file error for {copyright_file}. May be this file uses old foromat."
+        )
+    else:
+        for p in c.all_files_paragraphs():
+            if p.license and p.license.synopsis:
+                licenses.setdefault("synopsis", []).append(p.license.synopsis)
+                if len(p.license.text) > 0:
                     licenses.setdefault("text", {})[
-                        text.license.synopsis
-                    ] = text.license.text
+                        p.license.synopsis
+                    ] = p.license.text
+        for text in c.all_license_paragraphs():
+            if text.license:
+                licenses.setdefault("text", {})[
+                    text.license.synopsis
+                ] = text.license.text
 
     return licenses
 
@@ -108,13 +107,13 @@ def get_synopsis_and_copyright_text_from_copyright_text(pkgname, installed_pkgs,
             "text": {}
         }
 
-def read_copyright_files(rootfs, installed_pkgs, user_defined_licenses):
+def parse_copyright_text_to_license_info(rootfs, installed_pkgs, user_defined_licenses):
     for pkg in installed_pkgs:
         logger.debug(f"Checking copyright for {pkg}")
-        path = f"{rootfs}/usr/share/doc/{installed_pkgs[pkg]['package']}/copyright"
 
-        if os.path.exists(path):
-            licenses = parse_copyright_file(path)
+        copyright_text = installed_pkgs[pkg]["copyright_text"]
+        if copyright_text:
+            licenses = parse_copyright_text(copyright_text)
             if bool(licenses):
                 installed_pkgs[pkg]["licenses"] = licenses
         # else:
@@ -537,7 +536,7 @@ def main(args):
     #del imager_bom_pkgs["imx-boot"]
     # END TEST
     installed_pkgs.update(imager_bom_src_pkgs)
-    read_copyright_files(rootfs, installed_pkgs, user_defined_licenses)
+    parse_copyright_text_to_license_info(rootfs, installed_pkgs, user_defined_licenses)
 
     create_license_data(installed_pkgs, license_mapping)
 
