@@ -123,7 +123,10 @@ def read_copyright_files(rootfs, installed_pkgs, user_defined_licenses):
         get_synopsis_and_copyright_text_from_copyright_text(pkg, installed_pkgs, user_defined_licenses)
 
 
-def read_package_infor_from_deb_file(debfile, distro_arch, manifest_packages):
+def read_package_info_from_deb_file(debfile, distro_arch, 
+                                    imager_bom_src_pkgs,
+                                    imager_bom_bin_pkgs,
+                                    rootfs_pkgs):
     pkgname = None
     ret = {}
 
@@ -131,6 +134,21 @@ def read_package_infor_from_deb_file(debfile, distro_arch, manifest_packages):
         control = deb.debcontrol()
 
         pkgname = control.get("Package", "Unknown")
+        version = control.get("Version", "Unknown")
+
+        installed_version = None
+        if pkgname in imager_bom_src_pkgs:
+            installed_version = imager_bom_src_pkgs[pkgname]["version"]
+        elif pkgname in imager_bom_bin_pkgs:
+            installed_version = imager_bom_bin_pkgs[pkgname]["version"]
+        elif pkgname in rootfs_pkgs:
+            installed_version = rootfs_pkgs[pkgname]["version"]
+
+        if not installed_version == version:
+            if not installed_version is None:
+                print(f"{pkgname} version mismatch: installed:{installed_version} : debfile:{version}")
+            return None
+
         arch = control.get("Architecture", "Unknown")
         source = control.get("Source", None)
         if source is None:
@@ -140,15 +158,17 @@ def read_package_infor_from_deb_file(debfile, distro_arch, manifest_packages):
         maintainer = control.get("Maintainer", "Unknown")
         homepage = control.get("Homepage", "Unknown")
         section = control.get("Section", "Unknown")
-        version = control.get("Version", "Unknown")
 
-        path = f"usr/share/doc/{pkgname}/copyright"
-        if deb.data.has_file(path):
-            text = deb.data.get_content(path).decode("utf-8")
-        else:
-            pass
+        # Ignore packages which are not installed to rootfs or wic
+        if arch == distro_arch or arch == "all" \
+                or pkgname in imager_bom_src_pkgs \
+                or pkgname in imager_bom_bin_pkgs:
 
-        if arch == distro_arch or arch == "all" or pkgname in manifest_packages:
+            copyright_text = None
+            path = f"usr/share/doc/{pkgname}/copyright"
+            if deb.data.has_file(path):
+                copyright_text = deb.data.get_content(path).decode("utf-8")
+
             sha256sum = None
             sha256hash = hashlib.sha256()
             with open(debfile, "rb") as f:
@@ -164,22 +184,27 @@ def read_package_infor_from_deb_file(debfile, distro_arch, manifest_packages):
                 "sha256sum": sha256sum,
                 "description": desc,
                 "version": version,
+                "copyright_text": copyright_text,
             }
 
     return ret
 
 
-def get_package_info_fron_deb_file(
+def get_package_info_from_deb_file(
     dl_dir, repo_isar_dir,
     distro, image_distro,
-    distro_arch, manifest_packages,
+    distro_arch,
+    imager_bom_src_pkgs,
+    imager_bom_bin_pkgs,
+    rootfs_pkgs
 ):
     ret = {}
 
     debs = find_deb_packages(dl_dir, repo_isar_dir, distro, image_distro)
     for debfile in debs:
-        pkgdata = read_package_infor_from_deb_file(debfile, distro_arch, manifest_packages)
-        ret.update(pkgdata)
+        pkgdata = read_package_info_from_deb_file(debfile, distro_arch, imager_bom_src_pkgs, imager_bom_bin_pkgs, rootfs_pkgs)
+        if pkgdata:
+            ret.update(pkgdata)
 
     return ret
 
@@ -443,6 +468,15 @@ def get_imager_bom_pkg_info(imager_bom, srcinfo_json):
 
     return pkgs
 
+def create_package_map(installed_pkgs):
+    pkg_map = {}
+
+    for pkgname in installed_pkgs:
+        p = installed_pkgs[pkgname]
+        source = p["source"]
+        pkg_map.setdefault(source, []).append(pkgname)
+
+    return pkg_map
 
 def main(args):
     if args.verbose_output:
@@ -458,8 +492,7 @@ def main(args):
     if not distro:
         distro = bitbakeinfo["image_distro"].split("-")[1]
 
-    installed_pkgs = parse_dpkg_status(dpkg_status)
-    installed_pkgs = {}
+    rootfs_pkgs = parse_dpkg_status(dpkg_status)
     
     layers = bitbake_runner.find_layers()
     user_defined_licenses = read_license_files(layers, args.user_defined_licenses)
@@ -469,35 +502,45 @@ def main(args):
 
     image_deploy_dir = f"{bitbakeinfo['deploy_dir']}/images/{bitbakeinfo['machine']}"
     srcinfo_json = f"{image_deploy_dir}/all-source-info.json"
-    imager_bom_pkgs = get_imager_bom_pkg_info(imager_bom, srcinfo_json)
+    imager_bom_src_pkgs = get_imager_bom_pkg_info(imager_bom, srcinfo_json)
 
     manifests = manifest_parser.find_manifest_files(image_deploy_dir, bitbakeinfo["image_full_name"], bitbakeinfo["image_fstypes"])
-    manifest_packages = manifest_parser.collect_packages(manifests, imager_bom)
+    imager_bom_bin_pkgs = manifest_parser.collect_packages(manifests, imager_bom)
 
-    installed_pkgs.update(manifest_packages)
+    create_license_data_for_imager_bom(imager_bom_src_pkgs, license_mapping)
 
-    create_license_data_for_imager_bom(imager_bom_pkgs, license_mapping)
-
-    packages_info = get_package_info_fron_deb_file(
+    packages_info = get_package_info_from_deb_file(
         bitbakeinfo["dl_dir"],
         bitbakeinfo["repo_isar_dir"],
         distro,
         bitbakeinfo["image_distro"],
         bitbakeinfo["distro_arch"],
-        manifest_packages,
+        imager_bom_src_pkgs,
+        imager_bom_bin_pkgs,
+        rootfs_pkgs,
     )
 
+    # TEST
+    rootfs_pkgs = {}
+
+    installed_pkgs = {}
+    installed_pkgs.update(rootfs_pkgs)
+    installed_pkgs.update(imager_bom_bin_pkgs)
+ 
     installed_pkgs = merge_package_data(installed_pkgs, packages_info)
+
+    package_map = create_package_map(installed_pkgs)
 
     # TEST
     #installed_pkgs = {}
     #del imager_bom_pkgs["imx-atf"]
     #del imager_bom_pkgs["imx-boot"]
     # END TEST
-    installed_pkgs.update(imager_bom_pkgs)
+    installed_pkgs.update(imager_bom_src_pkgs)
     read_copyright_files(rootfs, installed_pkgs, user_defined_licenses)
 
     create_license_data(installed_pkgs, license_mapping)
+
 
     output_dir = f"{bitbakeinfo['deploy_dir']}/sbom/{bitbakeinfo['image_full_name']}"
     if not os.path.exists(output_dir):
