@@ -54,14 +54,14 @@ def find_deb_packages(dl_dir, repo_isar_dir, distro, image_distro):
     return ret
 
 
-def parse_copyright_text(copyright_text):
+def parse_copyright_text(pkgname, copyright_text):
     licenses = {}
 
     try:
         c = copyright.Copyright(io.StringIO(copyright_text), strict=False)
     except Exception:
         logger.debug(
-            f"Read copyright file error for {copyright_file}. May be this file uses old foromat."
+            f"Failed to parse copyright text for {pkgname}. May be this file uses old foromat."
         )
     else:
         for p in c.all_files_paragraphs():
@@ -106,21 +106,26 @@ def get_synopsis_and_copyright_text_from_copyright_text(pkgname, installed_pkgs,
             "synopsis": ["NOASSERTION"], 
             "text": {}
         }
+    
+        return False
 
-def parse_copyright_text_to_license_info(rootfs, installed_pkgs, user_defined_licenses):
+    return True
+
+
+def parse_copyright_text_to_license_info(rootfs, installed_pkgs, user_defined_licenses, package_map):
     for pkg in installed_pkgs:
         logger.debug(f"Checking copyright for {pkg}")
 
         copyright_text = installed_pkgs[pkg]["copyright_text"]
         if copyright_text:
-            licenses = parse_copyright_text(copyright_text)
+            licenses = parse_copyright_text(pkg, copyright_text)
             if bool(licenses):
                 installed_pkgs[pkg]["licenses"] = licenses
         # else:
         #    logger.warning(f"Packge {pkg} does not contain copyright file")
 
-        get_synopsis_and_copyright_text_from_copyright_text(pkg, installed_pkgs, user_defined_licenses)
-
+        if not get_synopsis_and_copyright_text_from_copyright_text(pkg, installed_pkgs, user_defined_licenses):
+            print(f"{pkg}: failed to parse copyright")
 
 def read_package_info_from_deb_file(debfile, distro_arch, 
                                     imager_bom_src_pkgs,
@@ -528,6 +533,7 @@ def main(args):
  
     installed_pkgs = merge_package_data(installed_pkgs, packages_info)
 
+
     package_map = create_package_map(installed_pkgs)
 
     # TEST
@@ -536,8 +542,8 @@ def main(args):
     #del imager_bom_pkgs["imx-boot"]
     # END TEST
     installed_pkgs.update(imager_bom_src_pkgs)
-    parse_copyright_text_to_license_info(rootfs, installed_pkgs, user_defined_licenses)
-
+    parse_copyright_text_to_license_info(rootfs, installed_pkgs, user_defined_licenses, package_map)
+    
     create_license_data(installed_pkgs, license_mapping)
 
 
