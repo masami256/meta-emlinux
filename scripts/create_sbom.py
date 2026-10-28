@@ -37,8 +37,6 @@ def merge_package_data(installed_pkgs, packages_info):
         if pkg in packages_info:
             installed_pkgs[pkg] = packages_info[pkg]
 
-    return installed_pkgs
-
 
 def find_deb_packages(dl_dir, repo_isar_dir, distro, image_distro):
     targets = [
@@ -113,6 +111,8 @@ def get_synopsis_and_copyright_text_from_copyright_text(pkgname, installed_pkgs,
 
 
 def parse_copyright_text_to_license_info(rootfs, installed_pkgs, user_defined_licenses, package_map):
+    rechecks = []
+
     for pkg in installed_pkgs:
         logger.debug(f"Checking copyright for {pkg}")
 
@@ -125,7 +125,17 @@ def parse_copyright_text_to_license_info(rootfs, installed_pkgs, user_defined_li
         #    logger.warning(f"Packge {pkg} does not contain copyright file")
 
         if not get_synopsis_and_copyright_text_from_copyright_text(pkg, installed_pkgs, user_defined_licenses):
-            print(f"{pkg}: failed to parse copyright")
+            rechecks.append(pkg)
+
+    # Set license from same source package.
+    for pkg in rechecks:
+        srcpkg = installed_pkgs[pkg]["source"]
+        for p in package_map[srcpkg]:
+            if p in rechecks:
+                continue
+
+            installed_pkgs[pkg]["licenses"] = installed_pkgs[p]["licenses"]
+
 
 def read_package_info_from_deb_file(debfile, distro_arch, 
                                     imager_bom_src_pkgs,
@@ -149,8 +159,6 @@ def read_package_info_from_deb_file(debfile, distro_arch,
             installed_version = rootfs_pkgs[pkgname]["version"]
 
         if not installed_version == version:
-            if not installed_version is None:
-                print(f"{pkgname} version mismatch: installed:{installed_version} : debfile:{version}")
             return None
 
         arch = control.get("Architecture", "Unknown")
@@ -524,24 +532,15 @@ def main(args):
         rootfs_pkgs,
     )
 
-    # TEST
-    rootfs_pkgs = {}
-
     installed_pkgs = {}
     installed_pkgs.update(rootfs_pkgs)
     installed_pkgs.update(imager_bom_bin_pkgs)
+    installed_pkgs.update(imager_bom_src_pkgs)
  
-    installed_pkgs = merge_package_data(installed_pkgs, packages_info)
-
+    merge_package_data(installed_pkgs, packages_info)
 
     package_map = create_package_map(installed_pkgs)
 
-    # TEST
-    #installed_pkgs = {}
-    #del imager_bom_pkgs["imx-atf"]
-    #del imager_bom_pkgs["imx-boot"]
-    # END TEST
-    installed_pkgs.update(imager_bom_src_pkgs)
     parse_copyright_text_to_license_info(rootfs, installed_pkgs, user_defined_licenses, package_map)
     
     create_license_data(installed_pkgs, license_mapping)
