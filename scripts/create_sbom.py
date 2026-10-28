@@ -97,9 +97,6 @@ def get_synopsis_and_copyright_text_from_copyright_text(pkgname, installed_pkgs,
                 installed_pkgs[pkgname]["licenses"]["text"][lic_name] = lic_data["text"]
 
     if not "licenses" in installed_pkgs[pkgname]:
-        logger.warning(
-            f"{pkgname}: Cannot get licenses from Copyright file and user defined license mapping file. So, set NOASSERTION as license."
-        )
         installed_pkgs[pkgname]["licenses"] = {
             "synopsis": ["NOASSERTION"], 
             "text": {}
@@ -230,14 +227,14 @@ def parse_dpkg_status(dpkgstatus):
 
             d["package"] = pkg.get("Package")
             d["source"] = pkg.get("Source")
-            d["version"] = pkg.get("Version")
-            d["maintainer"] = pkg.get("Maintainer")
-            d["section"] = pkg.get("Section")
-            d["homepage"] = pkg.get("Homepage", "No Homepage")
-            d["arch"] = pkg.get("Architecture")
             if d["source"] is None:
                 d["source"] = d["package"]
-            d["description"] = pkg.get("Description", "No description")
+            d["version"] = pkg.get("Version")
+            #d["maintainer"] = pkg.get("Maintainer")
+            #d["section"] = pkg.get("Section")
+            #d["homepage"] = pkg.get("Homepage", "No Homepage")
+            #d["arch"] = pkg.get("Architecture")
+            #d["description"] = pkg.get("Description", "No description")
             
             ret[d["package"]] = d
 
